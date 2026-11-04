@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#1f3a5f">
+<meta name="robots" content="noindex, nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="現場報告">
+<title>かんたん現場報告</title>
+<style>
+  :root {
+    --bg: #f2f3f5; --card: #fff; --ink: #1d2329; --sub: #5f6b76; --line: #dde1e6;
+    --accent: #e8590c; --navy: #1f3a5f; --danger: #c92a2a; --r: 14px;
+    color-scheme: light;
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+    font-size: 17px; line-height: 1.6;
+  }
+
+  /* 上の帯 */
+  .bar {
+    position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 12px;
+    padding: calc(env(safe-area-inset-top) + 10px) 16px 10px; background: var(--navy); color: #fff;
+  }
+  .bar h1 { font-size: 18px; margin: 0; flex: 1; }
+  .bar .back { color: #fff; text-decoration: none; font-size: 17px; }
+  .saved { font-size: 13px; opacity: 0; transition: opacity .3s; }
+  .saved.on { opacity: .85; }
+
+  .wrap { max-width: 640px; margin: 0 auto; padding: 16px 16px 120px; }
+
+  /* ボタン */
+  .btn {
+    display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%;
+    min-height: 52px; border-radius: var(--r); border: 0; font: inherit; font-weight: 700;
+    text-decoration: none; cursor: pointer;
+  }
+  .btn.big { min-height: 60px; font-size: 19px; }
+  .btn.primary { background: var(--accent); color: #fff; }
+  .btn.outline { background: #fff; color: var(--navy); border: 2px dashed var(--navy); }
+  .btn.danger-link { background: none; color: var(--danger); font-weight: 400; font-size: 15px; margin-top: 32px; min-height: 44px; }
+
+  /* 一覧 */
+  .search {
+    width: 100%; margin: 16px 0 10px; padding: 12px 14px; border: 1px solid var(--line);
+    border-radius: 12px; font: inherit; background: #fff; color: inherit;
+  }
+  .cards { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+  .card {
+    display: flex; gap: 12px; align-items: center; padding: 10px; background: var(--card);
+    border-radius: var(--r); text-decoration: none; color: inherit; box-shadow: 0 1px 2px rgba(0,0,0,.06);
+  }
+  .thumb {
+    width: 64px; height: 64px; border-radius: 10px; object-fit: cover; background: #e9ecef;
+    flex: none; display: grid; place-items: center; font-size: 26px;
+  }
+  .card-body { flex: 1; min-width: 0; }
+  .card-date { font-size: 13px; color: var(--sub); }
+  .card-title, .card-sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .card-title { font-weight: 700; }
+  .card-sub { font-size: 14px; color: var(--sub); }
+  .count { font-size: 13px; color: var(--sub); flex: none; }
+  .empty { text-align: center; color: var(--sub); padding: 40px 0; }
+
+  /* 入力 */
+  .panel { background: var(--card); border-radius: var(--r); padding: 4px 14px; }
+  .field { display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--line); min-height: 54px; }
+  .field:last-child { border-bottom: 0; }
+  .field span { width: 5.5em; flex: none; color: var(--sub); font-size: 15px; }
+  .field input { flex: 1; min-width: 0; border: 0; font: inherit; padding: 12px 0; background: transparent; color: inherit; }
+  /* iPhoneのSafariは日付を中央寄せにするので、他の欄と同じ左寄せにそろえる */
+  .field input[type="date"] { -webkit-appearance: none; appearance: none; text-align: left; min-height: 1.6em; }
+  .field input[type="date"]::-webkit-date-and-time-value { text-align: left; }
+  textarea { width: 100%; border: 0; font: inherit; resize: vertical; padding: 12px 0; background: transparent; color: inherit; }
+  input:focus, textarea:focus { outline: none; }
+  .sec { font-size: 15px; color: var(--sub); margin: 24px 4px 8px; font-weight: 700; }
+
+  /* 写真カード */
+  .photo-card { background: var(--card); border-radius: var(--r); overflow: hidden; margin-bottom: 12px; }
+  .ph { position: relative; background: #111; }
+  .ph img { display: block; width: 100%; max-height: 60vh; object-fit: contain; }
+  .no {
+    position: absolute; top: 8px; left: 8px; background: var(--accent); color: #fff; font-weight: 700;
+    border-radius: 999px; min-width: 32px; height: 32px; display: grid; place-items: center; padding: 0 8px;
+  }
+  .photo-card textarea { padding: 12px 14px; }
+  .ph-actions { display: flex; border-top: 1px solid var(--line); }
+  .ph-actions button { flex: 1; min-height: 46px; border: 0; background: none; font: inherit; color: var(--navy); }
+  .ph-actions button + button { border-left: 1px solid var(--line); }
+  .ph-actions .del { color: var(--danger); }
+  .addphoto { position: relative; }
+  .vh { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+  .hint { font-size: 14px; color: var(--sub); margin: 12px 4px; }
+
+  .dock {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    padding: 12px 16px calc(env(safe-area-inset-bottom) + 12px);
+    background: rgba(242,243,245,.92); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px);
+    border-top: 1px solid var(--line);
+  }
+  .dock .btn { max-width: 608px; margin: 0 auto; }
+
+  /* 報告書 */
+  .toolbar { max-width: 794px; margin: 0 auto; padding: 16px; }
+  .sheet { background: #fff; max-width: 794px; margin: 0 auto 40px; padding: 32px 28px; box-shadow: 0 2px 12px rgba(0,0,0,.08); }
+  .doc-title { text-align: center; font-size: 24px; letter-spacing: .3em; margin: 0 0 20px; padding-bottom: 8px; border-bottom: 3px double var(--ink); }
+  .meta { width: 100%; border-collapse: collapse; font-size: 14px; }
+  .meta th, .meta td { border: 1px solid #9aa3ad; padding: 6px 8px; text-align: left; vertical-align: top; }
+  .meta th { background: #eef1f5; width: 5.5em; font-weight: 600; white-space: nowrap; }
+  .sheet h2 { font-size: 16px; margin: 22px 0 10px; padding-left: 8px; border-left: 4px solid var(--navy); }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .grid figure { margin: 0; break-inside: avoid; }
+  .grid img { width: 100%; aspect-ratio: 4 / 3; object-fit: contain; background: #f1f3f5; border: 1px solid #ccd3da; display: block; }
+  .grid figcaption { font-size: 13px; margin-top: 4px; white-space: pre-wrap; }
+  .grid figcaption b { color: var(--navy); margin-right: 6px; }
+  .summary { border: 1px solid #9aa3ad; padding: 10px; min-height: 80px; white-space: pre-wrap; font-size: 14px; }
+  .doc-foot { margin-top: 24px; text-align: right; font-size: 11px; color: #8a94a0; }
+
+  @media (max-width: 480px) {
+    .sheet { padding: 20px 14px; }
+    .grid { gap: 10px; }
+  }
+  @media print {
+    @page { size: A4; margin: 12mm; }
+    body { background: #fff; }
+    .no-print { display: none !important; }
+    .sheet { box-shadow: none; margin: 0; padding: 0; max-width: none; }
+  }
+</style>
+</head>
+<body>
+<div id="app"></div>
+
+<script>
+// ===== 保存（iPhoneの中のIndexedDBにだけ保存し、外へは送らない） =====
+const DB_NAME = 'kantan-genba', DB_VER = 1;
+let dbPromise;
+function db() {
+  return dbPromise ||= new Promise((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VER);
+    req.onupgradeneeded = () => {
+      const d = req.result;
+      d.createObjectStore('reports', { keyPath: 'id' });
+      d.createObjectStore('photos', { keyPath: 'id' }).createIndex('reportId', 'reportId');
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+async function tx(store, mode, fn) {
+  const d = await db();
+  return new Promise((resolve, reject) => {
+    const t = d.transaction(store, mode);
+    let out;
+    const req = fn(t.objectStore(store));
+    if (req) req.onsuccess = () => { out = req.result; };
+    t.oncomplete = () => resolve(out);
+    t.onerror = () => reject(t.error);
+  });
+}
+const getAll = (store) => tx(store, 'readonly', s => s.getAll());
+const get = (store, id) => tx(store, 'readonly', s => s.get(id));
+const put = (store, v) => tx(store, 'readwrite', s => s.put(v));
+const del = (store, id) => tx(store, 'readwrite', s => s.delete(id));
+const photosOf = (reportId) => tx('photos', 'readonly', s => s.index('reportId').getAll(reportId));
+
+// ===== 小道具 =====
+const app = document.getElementById('app');
+const $ = (sel, root = document) => root.querySelector(sel);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const WEEK = ['日', '月', '火', '水', '木', '金', '土'];
+
+function today() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function jpDate(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-').map(Number);
+  return `${y}年${m}月${d}日（${WEEK[new Date(y, m - 1, d).getDay()]}）`;
+}
+
+let urls = [];
+function freeUrls() { urls.forEach(u => URL.revokeObjectURL(u)); urls = []; }
+function objUrl(blob) { const u = URL.createObjectURL(blob); urls.push(u); return u; }
+
+// 写真は長い辺1600pxに縮めて保存（容量を抑える）
+async function shrink(file) {
+  const bmp = await createImageBitmap(file);
+  const k = Math.min(1, 1600 / Math.max(bmp.width, bmp.height));
+  const c = document.createElement('canvas');
+  c.width = Math.round(bmp.width * k);
+  c.height = Math.round(bmp.height * k);
+  c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+  return new Promise(resolve => c.toBlob(resolve, 'image/jpeg', 0.82));
+}
+
+function datalist(id, values) {
+  return `<datalist id="${id}">${values.map(v => `<option value="${esc(v)}">`).join('')}</datalist>`;
+}
+
+// ===== 画面の切り替え =====
+async function render() {
+  freeUrls();
+  window.scrollTo(0, 0);
+  const [view, id] = location.hash.replace(/^#\/?/, '').split('/');
+  if (view === 'edit' && id) return renderEdit(id);
+  if (view === 'report' && id) return renderReport(id);
+  return renderList();
+}
+window.addEventListener('hashchange', render);
+
+// ----- 一覧 -----
+async function renderList() {
+  const reports = (await getAll('reports'))
+    .sort((a, b) => b.date.localeCompare(a.date) || b.updatedAt - a.updatedAt);
+  const thumbs = await Promise.all(reports.map(r => r.photoOrder[0] ? get('photos', r.photoOrder[0]) : null));
+
+  app.innerHTML = `
+    <header class="bar"><h1>かんたん現場報告</h1></header>
+    <main class="wrap">
+      <button class="btn primary big" id="new">＋ 新しい報告をつくる</button>
+      ${reports.length ? `<input class="search" type="search" id="q" placeholder="お客様・現場・作業内容で探す">` : ''}
+      <ul class="cards" id="cards">
+        ${reports.map((r, i) => `
+          <li data-text="${esc([r.customer, r.site, r.title, r.worker].join(' ').toLowerCase())}">
+            <a class="card" href="#/edit/${r.id}">
+              ${thumbs[i] ? `<img class="thumb" data-i="${i}" alt="">` : `<div class="thumb">📋</div>`}
+              <div class="card-body">
+                <div class="card-date">${esc(jpDate(r.date))}</div>
+                <div class="card-title">${esc(r.customer || '（お客様 未入力）')}</div>
+                <div class="card-sub">${esc([r.site, r.title].filter(Boolean).join('・') || '　')}</div>
+              </div>
+              <span class="count">📷 ${r.photoOrder.length}</span>
+            </a>
+          </li>`).join('')}
+      </ul>
+      ${reports.length ? '' : `<p class="empty">まだ報告はありません。<br>上のボタンから始めましょう。</p>`}
+    </main>`;
+
+  app.querySelectorAll('img.thumb').forEach(img => { img.src = objUrl(thumbs[img.dataset.i].blob); });
+
+  $('#new').onclick = async () => {
+    const r = {
+      id: uid(), date: today(), customer: '', site: '', title: '',
+      worker: localStorage.getItem('lastWorker') || '', summary: '',
+      photoOrder: [], createdAt: Date.now(), updatedAt: Date.now(),
+    };
+    await put('reports', r);
+    location.hash = `#/edit/${r.id}`;
+  };
+
+  const q = $('#q');
+  if (q) q.oninput = () => {
+    const words = q.value.toLowerCase().split(/\s+/).filter(Boolean);
+    app.querySelectorAll('#cards li').forEach(li => {
+      li.hidden = !words.every(w => li.dataset.text.includes(w));
+    });
+  };
+}
+
+// ----- 入力 -----
+async function renderEdit(id) {
+  const r = await get('reports', id);
+  if (!r) { location.hash = '#/'; return; }
+  const all = await getAll('reports');
+  const past = (k) => [...new Set(all.map(x => x[k]).filter(Boolean))];
+
+  app.innerHTML = `
+    <header class="bar"><a href="#/" class="back">‹ 一覧</a><h1>報告を入力</h1><span class="saved" id="saved">保存しました</span></header>
+    <main class="wrap">
+      <section class="panel">
+        <label class="field"><span>日付</span><input type="date" data-k="date"></label>
+        <label class="field"><span>お客様</span><input data-k="customer" list="dl-customer" placeholder="例：山田工務店 様"></label>
+        <label class="field"><span>現場・場所</span><input data-k="site" list="dl-site" placeholder="例：中央町 山田様邸"></label>
+        <label class="field"><span>作業内容</span><input data-k="title" list="dl-title" placeholder="例：エアコン点検"></label>
+        <label class="field"><span>担当者</span><input data-k="worker" list="dl-worker" placeholder="例：佐藤"></label>
+      </section>
+
+      <h2 class="sec">写真 <span id="pcount"></span></h2>
+      <div id="photos"></div>
+      <label class="btn big outline addphoto" id="addLabel">
+        <span id="addText">📷 写真を撮る・選ぶ</span>
+        <input type="file" accept="image/*" multiple class="vh" id="file">
+      </label>
+
+      <h2 class="sec">まとめ・申し送り</h2>
+      <section class="panel"><textarea data-k="summary" rows="4" placeholder="例：配管の錆は次回交換を提案。お客様了承済み。"></textarea></section>
+      <p class="hint">🎤 文字を入れる欄では、キーボードのマイクを押すと話して入力できます。</p>
+
+      <button class="btn danger-link" id="delete">この報告を削除</button>
+    </main>
+    <footer class="dock"><a class="btn primary big" href="#/report/${r.id}">📄 報告書を見る</a></footer>
+    ${datalist('dl-customer', past('customer'))}${datalist('dl-site', past('site'))}
+    ${datalist('dl-title', past('title'))}${datalist('dl-worker', past('worker'))}`;
+
+  // 入力したらすぐ自動で保存
+  let saveTimer, flashTimer;
+  const save = async () => {
+    r.updatedAt = Date.now();
+    await put('reports', r);
+    const s = $('#saved');
+    s.classList.add('on');
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => s.classList.remove('on'), 1200);
+  };
+  const saveSoon = () => { clearTimeout(saveTimer); saveTimer = setTimeout(save, 300); };
+
+  app.querySelectorAll('[data-k]').forEach(el => {
+    el.value = r[el.dataset.k] ?? '';
+    el.addEventListener('input', () => {
+      r[el.dataset.k] = el.value;
+      if (el.dataset.k === 'worker') localStorage.setItem('lastWorker', el.value);
+      saveSoon();
+    });
+  });
+
+  async function drawPhotos() {
+    freeUrls();
+    const box = $('#photos');
+    box.innerHTML = '';
+    $('#pcount').textContent = r.photoOrder.length ? `（${r.photoOrder.length}枚）` : '';
+    for (const [i, pid] of r.photoOrder.entries()) {
+      const p = await get('photos', pid);
+      if (!p) continue;
+      const el = document.createElement('div');
+      el.className = 'photo-card';
+      el.innerHTML = `
+        <div class="ph"><img alt=""><span class="no">${i + 1}</span></div>
+        <textarea rows="2" placeholder="この写真の説明（例：室外機の配管に錆あり）"></textarea>
+        <div class="ph-actions">
+          <button data-a="up" ${i === 0 ? 'disabled' : ''}>↑ 前へ</button>
+          <button data-a="down" ${i === r.photoOrder.length - 1 ? 'disabled' : ''}>↓ 後へ</button>
+          <button data-a="del" class="del">削除</button>
+        </div>`;
+      $('img', el).src = objUrl(p.blob);
+      const ta = $('textarea', el);
+      ta.value = p.caption || '';
+      let t;
+      ta.addEventListener('input', () => {
+        p.caption = ta.value;
+        clearTimeout(t);
+        t = setTimeout(() => put('photos', p).then(save), 300);
+      });
+      el.querySelector('.ph-actions').onclick = async (e) => {
+        const a = e.target.closest('button')?.dataset.a;
+        if (!a) return;
+        const order = r.photoOrder;
+        if (a === 'up' && i > 0) [order[i - 1], order[i]] = [order[i], order[i - 1]];
+        if (a === 'down' && i < order.length - 1) [order[i + 1], order[i]] = [order[i], order[i + 1]];
+        if (a === 'del') {
+          if (!confirm(`写真 ${i + 1} を削除しますか？`)) return;
+          await del('photos', pid);
+          order.splice(i, 1);
+        }
+        await save();
+        drawPhotos();
+      };
+      box.appendChild(el);
+    }
+  }
+  await drawPhotos();
+
+  const file = $('#file');
+  file.addEventListener('change', async () => {
+    const files = [...file.files];
+    file.value = '';
+    if (!files.length) return;
+    $('#addText').textContent = '⏳ 写真を取り込み中…';
+    for (const f of files) {
+      try {
+        const blob = await shrink(f);
+        const pid = uid();
+        await put('photos', { id: pid, reportId: r.id, blob, caption: '' });
+        r.photoOrder.push(pid);
+      } catch (err) {
+        alert(`「${f.name}」を読み込めませんでした。`);
+      }
+    }
+    await save();
+    $('#addText').textContent = '📷 写真を撮る・選ぶ';
+    await drawPhotos();
+  });
+
+  $('#delete').onclick = async () => {
+    if (!confirm('この報告と写真をすべて削除します。よろしいですか？')) return;
+    for (const p of await photosOf(r.id)) await del('photos', p.id);
+    await del('reports', r.id);
+    location.hash = '#/';
+  };
+}
+
+// ----- 報告書 -----
+async function renderReport(id) {
+  const r = await get('reports', id);
+  if (!r) { location.hash = '#/'; return; }
+  const photos = (await Promise.all(r.photoOrder.map(pid => get('photos', pid)))).filter(Boolean);
+
+  app.innerHTML = `
+    <header class="bar no-print"><a href="#/edit/${r.id}" class="back">‹ 入力に戻る</a><h1>報告書</h1></header>
+    <div class="toolbar no-print">
+      <button class="btn primary big" id="print">🖨 PDFで保存・印刷</button>
+    </div>
+    <article class="sheet">
+      <h1 class="doc-title">作業報告書</h1>
+      <table class="meta">
+        <tr><th>日付</th><td>${esc(jpDate(r.date))}</td></tr>
+        <tr><th>お客様</th><td>${esc(r.customer)}</td></tr>
+        <tr><th>現場・場所</th><td>${esc(r.site)}</td></tr>
+        <tr><th>作業内容</th><td>${esc(r.title)}</td></tr>
+        <tr><th>担当者</th><td>${esc(r.worker)}</td></tr>
+      </table>
+      <h2>写真記録（${photos.length}枚）</h2>
+      <div class="grid">
+        ${photos.map((p, i) => `
+          <figure><img data-i="${i}" alt="写真${i + 1}"><figcaption><b>No.${i + 1}</b>${esc(p.caption)}</figcaption></figure>`).join('')}
+      </div>
+      <h2>まとめ・申し送り</h2>
+      <div class="summary">${esc(r.summary)}</div>
+      <p class="doc-foot">かんたん現場報告で作成</p>
+    </article>`;
+
+  app.querySelectorAll('.grid img').forEach(img => { img.src = objUrl(photos[img.dataset.i].blob); });
+  $('#print').onclick = () => window.print();
+}
+
+// ブラウザに「消さないで」とお願いしておく（Safariは使わない日が続くと消すことがある）
+navigator.storage?.persist?.().catch(() => {});
+render();
+</script>
+</body>
+</html>

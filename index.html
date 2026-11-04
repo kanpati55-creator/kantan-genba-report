@@ -43,6 +43,8 @@
   .btn.big { min-height: 60px; font-size: 19px; }
   .btn.primary { background: var(--accent); color: #fff; }
   .btn.outline { background: #fff; color: var(--navy); border: 2px dashed var(--navy); }
+  .btn:disabled { opacity: .6; cursor: default; }
+  .broken { color: #fff; margin: 0; padding: 56px 20px; text-align: center; font-size: 15px; }
   .btn.danger-link { background: none; color: var(--danger); font-weight: 400; font-size: 15px; margin-top: 32px; min-height: 44px; }
 
   /* 一覧 */
@@ -190,6 +192,25 @@ let urls = [];
 function freeUrls() { urls.forEach(u => URL.revokeObjectURL(u)); urls = []; }
 function objUrl(blob) { const u = URL.createObjectURL(blob); urls.push(u); return u; }
 
+// 写真の中身はBlobのままではなくArrayBufferで保存する
+// （iPhoneのSafariは、カメラ起動などで裏に回ったあと、保存したBlobを読めなくなることがある）
+async function photoBlob(p) {
+  if (p.data) return new Blob([p.data], { type: p.type || 'image/jpeg' });
+  if (p.blob) {
+    // 第1版で保存した写真は、読めるうちに新しい形へ移しておく
+    try {
+      p.data = await p.blob.arrayBuffer();
+      p.type = p.blob.type || 'image/jpeg';
+      delete p.blob;
+      await put('photos', p);
+      return new Blob([p.data], { type: p.type });
+    } catch (err) {
+      return null;
+    }
+  }
+  return null;
+}
+
 // 写真は長い辺1600pxに縮めて保存（容量を抑える）
 async function shrink(file) {
   const bmp = await createImageBitmap(file);
@@ -203,6 +224,206 @@ async function shrink(file) {
 
 function datalist(id, values) {
   return `<datalist id="${id}">${values.map(v => `<option value="${esc(v)}">`).join('')}</datalist>`;
+}
+
+// ===== PDF（印刷の命令を使わず、アプリの中でA4のPDFを作る） =====
+// A4を150dpi相当の絵として1ページずつ描き、JPEGにしてPDFに詰める
+const PW = 1240, PH = 1754, PM = 90;
+const FONT = '"Hiragino Sans", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif';
+const INK = '#1d2329', NAVY = '#1f3a5f', SUB = '#5f6b76';
+
+function wrapText(ctx, text, maxW) {
+  const lines = [];
+  for (const para of String(text ?? '').split('\n')) {
+    let line = '';
+    for (const ch of para) {
+      if (line && ctx.measureText(line + ch).width > maxW) { lines.push(line); line = ch; }
+      else line += ch;
+    }
+    lines.push(line);
+  }
+  return lines;
+}
+
+async function buildPdf(r, photos) {
+  const pages = [];
+  const tw = PW - PM * 2;
+  const bottom = PH - PM - 30;
+  let ctx, y;
+
+  const font = (size, weight = 400) => { ctx.font = `${weight} ${size}px ${FONT}`; };
+  const newPage = () => {
+    const c = document.createElement('canvas');
+    c.width = PW;
+    c.height = PH;
+    ctx = c.getContext('2d');
+    ctx.fillStyle = '#fff';
+    ctx.fillRect(0, 0, PW, PH);
+    ctx.textBaseline = 'top';
+    pages.push(c);
+    y = PM;
+    if (pages.length > 1) {
+      font(22, 600);
+      ctx.fillStyle = SUB;
+      ctx.fillText(`作業報告書（つづき）　${r.customer || ''}`, PM, y);
+      y += 50;
+    }
+  };
+  const ensure = (h) => { if (y + h > bottom) newPage(); };
+  const heading = (text) => {
+    ensure(110);
+    ctx.fillStyle = NAVY;
+    ctx.fillRect(PM, y, 8, 34);
+    font(28, 700);
+    ctx.fillStyle = INK;
+    ctx.fillText(text, PM + 20, y + 1);
+    y += 54;
+  };
+
+  newPage();
+
+  // 表題
+  font(50, 700);
+  ctx.fillStyle = INK;
+  ctx.textAlign = 'center';
+  ctx.fillText('作 業 報 告 書', PW / 2, y);
+  ctx.textAlign = 'left';
+  y += 78;
+  ctx.fillRect(PM, y, tw, 4);
+  ctx.fillRect(PM, y + 9, tw, 2);
+  y += 40;
+
+  // 基本情報の表
+  const labelW = 200;
+  const rows = [['日付', jpDate(r.date)], ['お客様', r.customer], ['現場・場所', r.site], ['作業内容', r.title], ['担当者', r.worker]];
+  for (const [k, v] of rows) {
+    font(26);
+    const lines = wrapText(ctx, v, tw - labelW - 32);
+    const h = Math.max(60, lines.length * 38 + 22);
+    ctx.fillStyle = '#eef1f5';
+    ctx.fillRect(PM, y, labelW, h);
+    ctx.strokeStyle = '#9aa3ad';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(PM, y, labelW, h);
+    ctx.strokeRect(PM + labelW, y, tw - labelW, h);
+    ctx.fillStyle = INK;
+    font(26, 600);
+    ctx.fillText(k, PM + 16, y + 15);
+    font(26);
+    lines.forEach((ln, i) => ctx.fillText(ln, PM + labelW + 16, y + 15 + i * 38));
+    y += h;
+  }
+  y += 40;
+
+  // 写真（2列で並べ、入りきらなければ次のページへ）
+  heading(`写真記録（${photos.length}枚）`);
+  const gap = 30, cw = (tw - gap) / 2, ih = Math.round(cw * 0.75);
+  for (let i = 0; i < photos.length; i += 2) {
+    const pair = photos.slice(i, i + 2);
+    font(22);
+    const caps = pair.map(p => wrapText(ctx, p.caption, cw));
+    const rowH = ih + 46 + Math.max(...caps.map(c => c.length)) * 30 + 26;
+    ensure(rowH);
+    for (const [j, p] of pair.entries()) {
+      const x = PM + j * (cw + gap);
+      ctx.fillStyle = '#f1f3f5';
+      ctx.fillRect(x, y, cw, ih);
+      if (p.blob) {
+        const bmp = await createImageBitmap(p.blob);
+        const k = Math.min(cw / bmp.width, ih / bmp.height);
+        const w = bmp.width * k, h = bmp.height * k;
+        ctx.drawImage(bmp, x + (cw - w) / 2, y + (ih - h) / 2, w, h);
+        bmp.close?.();
+      } else {
+        font(22);
+        ctx.fillStyle = SUB;
+        ctx.textAlign = 'center';
+        ctx.fillText('（写真を読み込めませんでした）', x + cw / 2, y + ih / 2 - 12);
+        ctx.textAlign = 'left';
+      }
+      ctx.strokeStyle = '#ccd3da';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, cw, ih);
+      font(24, 700);
+      ctx.fillStyle = NAVY;
+      ctx.fillText(`No.${i + j + 1}`, x, y + ih + 12);
+      font(22);
+      ctx.fillStyle = INK;
+      caps[j].forEach((ln, n) => ctx.fillText(ln, x, y + ih + 46 + n * 30));
+    }
+    y += rowH;
+  }
+  y += 10;
+
+  // まとめ（長いときはページをまたいで続ける）
+  heading('まとめ・申し送り');
+  font(24);
+  let rest = wrapText(ctx, r.summary, tw - 36);
+  do {
+    if (bottom - y < 120) newPage();
+    const n = Math.max(1, Math.min(rest.length, Math.floor((bottom - y - 30) / 34)));
+    const chunk = rest.slice(0, n);
+    rest = rest.slice(n);
+    const h = Math.max(120, chunk.length * 34 + 30);
+    ctx.strokeStyle = '#9aa3ad';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(PM, y, tw, h);
+    font(24);
+    ctx.fillStyle = INK;
+    chunk.forEach((ln, i) => ctx.fillText(ln, PM + 18, y + 16 + i * 34));
+    y += h;
+  } while (rest.length);
+
+  // ページ番号
+  pages.forEach((c, i) => {
+    const g = c.getContext('2d');
+    g.font = `400 18px ${FONT}`;
+    g.fillStyle = '#8a94a0';
+    g.textBaseline = 'top';
+    g.textAlign = 'center';
+    g.fillText(`${i + 1} / ${pages.length}`, PW / 2, PH - PM + 20);
+    g.textAlign = 'right';
+    g.fillText('かんたん現場報告で作成', PW - PM, PH - PM + 20);
+  });
+
+  const jpegs = [];
+  for (const c of pages) {
+    const blob = await new Promise(resolve => c.toBlob(resolve, 'image/jpeg', 0.85));
+    jpegs.push({ bytes: new Uint8Array(await blob.arrayBuffer()), w: c.width, h: c.height });
+    c.width = c.height = 0; // iPhoneのメモリを早めに空ける
+  }
+  return makePdf(jpegs);
+}
+
+// JPEGの絵を1ページに1枚ずつ貼ったPDFを組み立てる
+function makePdf(jpegs) {
+  const enc = new TextEncoder();
+  const chunks = [], offsets = [];
+  let len = 0;
+  const add = (x) => { const b = typeof x === 'string' ? enc.encode(x) : x; chunks.push(b); len += b.length; };
+  const obj = (n, body) => { offsets[n] = len; add(`${n} 0 obj\n`); body(); add('\nendobj\n'); };
+  const W = 595.28, H = 841.89; // A4（ポイント）
+  const total = 3 + jpegs.length * 3;
+
+  add('%PDF-1.4\n');
+  obj(1, () => add('<< /Type /Catalog /Pages 2 0 R >>'));
+  obj(2, () => add(`<< /Type /Pages /Count ${jpegs.length} /Kids [${jpegs.map((_, i) => `${3 + i * 3} 0 R`).join(' ')}] >>`));
+  jpegs.forEach((j, i) => {
+    const n = 3 + i * 3;
+    const draw = `q ${W} 0 0 ${H} 0 0 cm /Im${i} Do Q`;
+    obj(n, () => add(`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${W} ${H}] /Resources << /XObject << /Im${i} ${n + 2} 0 R >> >> /Contents ${n + 1} 0 R >>`));
+    obj(n + 1, () => add(`<< /Length ${draw.length} >>\nstream\n${draw}\nendstream`));
+    obj(n + 2, () => {
+      add(`<< /Type /XObject /Subtype /Image /Width ${j.w} /Height ${j.h} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${j.bytes.length} >>\nstream\n`);
+      add(j.bytes);
+      add('\nendstream');
+    });
+  });
+  const xref = len;
+  add(`xref\n0 ${total}\n0000000000 65535 f \n`);
+  for (let n = 1; n < total; n++) add(`${String(offsets[n]).padStart(10, '0')} 00000 n \n`);
+  add(`trailer\n<< /Size ${total} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`);
+  return new Blob(chunks, { type: 'application/pdf' });
 }
 
 // ===== 画面の切り替え =====
@@ -220,7 +441,10 @@ window.addEventListener('hashchange', render);
 async function renderList() {
   const reports = (await getAll('reports'))
     .sort((a, b) => b.date.localeCompare(a.date) || b.updatedAt - a.updatedAt);
-  const thumbs = await Promise.all(reports.map(r => r.photoOrder[0] ? get('photos', r.photoOrder[0]) : null));
+  const thumbs = await Promise.all(reports.map(async r => {
+    const p = r.photoOrder[0] && await get('photos', r.photoOrder[0]);
+    return p ? photoBlob(p) : null;
+  }));
 
   app.innerHTML = `
     <header class="bar"><h1>かんたん現場報告</h1></header>
@@ -244,7 +468,7 @@ async function renderList() {
       ${reports.length ? '' : `<p class="empty">まだ報告はありません。<br>上のボタンから始めましょう。</p>`}
     </main>`;
 
-  app.querySelectorAll('img.thumb').forEach(img => { img.src = objUrl(thumbs[img.dataset.i].blob); });
+  app.querySelectorAll('img.thumb').forEach(img => { img.src = objUrl(thumbs[img.dataset.i]); });
 
   $('#new').onclick = async () => {
     const r = {
@@ -321,14 +545,21 @@ async function renderEdit(id) {
     });
   });
 
+  // 続けて呼ばれても、最後の1回だけが画面を作る（読み込み途中の写真が消えるのを防ぐ）
+  let drawGen = 0;
   async function drawPhotos() {
+    const gen = ++drawGen;
+    const items = [];
+    for (const [i, pid] of r.photoOrder.entries()) {
+      const p = await get('photos', pid);
+      if (p) items.push({ i, pid, p, blob: await photoBlob(p) });
+      if (gen !== drawGen) return;
+    }
     freeUrls();
     const box = $('#photos');
     box.innerHTML = '';
     $('#pcount').textContent = r.photoOrder.length ? `（${r.photoOrder.length}枚）` : '';
-    for (const [i, pid] of r.photoOrder.entries()) {
-      const p = await get('photos', pid);
-      if (!p) continue;
+    for (const { i, pid, p, blob } of items) {
       const el = document.createElement('div');
       el.className = 'photo-card';
       el.innerHTML = `
@@ -339,7 +570,8 @@ async function renderEdit(id) {
           <button data-a="down" ${i === r.photoOrder.length - 1 ? 'disabled' : ''}>↓ 後へ</button>
           <button data-a="del" class="del">削除</button>
         </div>`;
-      $('img', el).src = objUrl(p.blob);
+      if (blob) $('img', el).src = objUrl(blob);
+      else $('.ph', el).innerHTML = `<p class="broken">⚠️ この写真を読み込めませんでした。<br>お手数ですが「削除」して入れ直してください。</p><span class="no">${i + 1}</span>`;
       const ta = $('textarea', el);
       ta.value = p.caption || '';
       let t;
@@ -375,9 +607,9 @@ async function renderEdit(id) {
     $('#addText').textContent = '⏳ 写真を取り込み中…';
     for (const f of files) {
       try {
-        const blob = await shrink(f);
+        const data = await (await shrink(f)).arrayBuffer();
         const pid = uid();
-        await put('photos', { id: pid, reportId: r.id, blob, caption: '' });
+        await put('photos', { id: pid, reportId: r.id, data, type: 'image/jpeg', caption: '' });
         r.photoOrder.push(pid);
       } catch (err) {
         alert(`「${f.name}」を読み込めませんでした。`);
@@ -400,12 +632,17 @@ async function renderEdit(id) {
 async function renderReport(id) {
   const r = await get('reports', id);
   if (!r) { location.hash = '#/'; return; }
-  const photos = (await Promise.all(r.photoOrder.map(pid => get('photos', pid)))).filter(Boolean);
+  const photos = [];
+  for (const pid of r.photoOrder) {
+    const p = await get('photos', pid);
+    if (p) photos.push({ caption: p.caption || '', blob: await photoBlob(p) });
+  }
 
   app.innerHTML = `
     <header class="bar no-print"><a href="#/edit/${r.id}" class="back">‹ 入力に戻る</a><h1>報告書</h1></header>
     <div class="toolbar no-print">
-      <button class="btn primary big" id="print">🖨 PDFで保存・印刷</button>
+      <button class="btn primary big" id="share" disabled>⏳ PDFを準備中…</button>
+      <p class="hint">iPhoneの共有画面が開きます。PDFとして保存したり、メールなどでそのまま送ったりできます。</p>
     </div>
     <article class="sheet">
       <h1 class="doc-title">作業報告書</h1>
@@ -426,8 +663,42 @@ async function renderReport(id) {
       <p class="doc-foot">かんたん現場報告で作成</p>
     </article>`;
 
-  app.querySelectorAll('.grid img').forEach(img => { img.src = objUrl(photos[img.dataset.i].blob); });
-  $('#print').onclick = () => window.print();
+  app.querySelectorAll('.grid img').forEach(img => {
+    const b = photos[img.dataset.i].blob;
+    if (b) img.src = objUrl(b);
+  });
+
+  // ホーム画面から開いたアプリでは印刷の命令が動かないので、PDFはアプリの中で作って共有画面に渡す。
+  // 共有はボタンを押した直後に呼ばないとiPhoneが止めるため、PDFは画面を開いた時点で先に作っておく。
+  const btn = $('#share');
+  let file;
+  try {
+    const pdf = await buildPdf(r, photos);
+    const safe = (s) => String(s || '').replace(/[\\/:*?"<>|\s]+/g, '_');
+    file = new File([pdf], `作業報告書_${r.date}_${safe(r.customer) || 'お客様'}.pdf`, { type: 'application/pdf' });
+  } catch (err) {
+    console.error(err);
+    btn.textContent = 'PDFを作れませんでした';
+    return;
+  }
+  btn.disabled = false;
+  btn.textContent = '📤 PDFを保存・送る';
+  btn.onclick = async () => {
+    if (navigator.canShare?.({ files: [file] })) {
+      try {
+        // 題名を付けると「テキスト.txt」まで一緒に保存されるので、PDFだけを渡す
+        await navigator.share({ files: [file] });
+      } catch (err) {
+        if (err.name !== 'AbortError') alert('共有画面を開けませんでした。');
+      }
+    } else {
+      // パソコンのブラウザなど、共有画面がない場合はそのままダウンロード
+      const a = document.createElement('a');
+      a.href = objUrl(file);
+      a.download = file.name;
+      a.click();
+    }
+  };
 }
 
 // ブラウザに「消さないで」とお願いしておく（Safariは使わない日が続くと消すことがある）

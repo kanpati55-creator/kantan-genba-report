@@ -277,7 +277,7 @@ async function buildPdf(r, photos) {
     font(28, 700);
     ctx.fillStyle = INK;
     ctx.fillText(text, PM + 20, y + 1);
-    y += 54;
+    y += 50;
   };
 
   newPage();
@@ -288,10 +288,10 @@ async function buildPdf(r, photos) {
   ctx.textAlign = 'center';
   ctx.fillText('作 業 報 告 書', PW / 2, y);
   ctx.textAlign = 'left';
-  y += 78;
+  y += 72;
   ctx.fillRect(PM, y, tw, 4);
   ctx.fillRect(PM, y + 9, tw, 2);
-  y += 40;
+  y += 34;
 
   // 基本情報の表
   const labelW = 200;
@@ -299,7 +299,7 @@ async function buildPdf(r, photos) {
   for (const [k, v] of rows) {
     font(26);
     const lines = wrapText(ctx, v, tw - labelW - 32);
-    const h = Math.max(60, lines.length * 38 + 22);
+    const h = Math.max(56, lines.length * 36 + 20);
     ctx.fillStyle = '#eef1f5';
     ctx.fillRect(PM, y, labelW, h);
     ctx.strokeStyle = '#9aa3ad';
@@ -308,21 +308,41 @@ async function buildPdf(r, photos) {
     ctx.strokeRect(PM + labelW, y, tw - labelW, h);
     ctx.fillStyle = INK;
     font(26, 600);
-    ctx.fillText(k, PM + 16, y + 15);
+    ctx.fillText(k, PM + 16, y + 13);
     font(26);
-    lines.forEach((ln, i) => ctx.fillText(ln, PM + labelW + 16, y + 15 + i * 38));
+    lines.forEach((ln, i) => ctx.fillText(ln, PM + labelW + 16, y + 13 + i * 36));
     y += h;
   }
-  y += 40;
+  y += 30;
 
-  // 写真（2列で並べ、入りきらなければ次のページへ）
+  // まとめ（結論を先に読めるよう、写真より前に置く。長いときはページをまたいで続ける）
+  heading('まとめ・申し送り');
+  font(24);
+  let rest = wrapText(ctx, r.summary, tw - 36);
+  do {
+    if (bottom - y < 100) newPage();
+    const n = Math.max(1, Math.min(rest.length, Math.floor((bottom - y - 28) / 34)));
+    const chunk = rest.slice(0, n);
+    rest = rest.slice(n);
+    const h = Math.max(96, chunk.length * 34 + 28);
+    ctx.strokeStyle = '#9aa3ad';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(PM, y, tw, h);
+    font(24);
+    ctx.fillStyle = INK;
+    chunk.forEach((ln, i) => ctx.fillText(ln, PM + 18, y + 15 + i * 34));
+    y += h;
+  } while (rest.length);
+  y += 32;
+
+  // 写真（2列で並べ、入りきらなければ次のページへ。4枚＋まとめが1ページに収まる大きさ）
   heading(`写真記録（${photos.length}枚）`);
-  const gap = 30, cw = (tw - gap) / 2, ih = Math.round(cw * 0.75);
+  const gap = 30, cw = (tw - gap) / 2, ih = Math.round(cw * 0.64);
   for (let i = 0; i < photos.length; i += 2) {
     const pair = photos.slice(i, i + 2);
     font(22);
     const caps = pair.map(p => wrapText(ctx, p.caption, cw));
-    const rowH = ih + 46 + Math.max(...caps.map(c => c.length)) * 30 + 26;
+    const rowH = ih + 42 + Math.max(...caps.map(c => c.length)) * 28 + 18;
     ensure(rowH);
     for (const [j, p] of pair.entries()) {
       const x = PM + j * (cw + gap);
@@ -346,33 +366,13 @@ async function buildPdf(r, photos) {
       ctx.strokeRect(x, y, cw, ih);
       font(24, 700);
       ctx.fillStyle = NAVY;
-      ctx.fillText(`No.${i + j + 1}`, x, y + ih + 12);
+      ctx.fillText(`No.${i + j + 1}`, x, y + ih + 10);
       font(22);
       ctx.fillStyle = INK;
-      caps[j].forEach((ln, n) => ctx.fillText(ln, x, y + ih + 46 + n * 30));
+      caps[j].forEach((ln, n) => ctx.fillText(ln, x, y + ih + 42 + n * 28));
     }
     y += rowH;
   }
-  y += 10;
-
-  // まとめ（長いときはページをまたいで続ける）
-  heading('まとめ・申し送り');
-  font(24);
-  let rest = wrapText(ctx, r.summary, tw - 36);
-  do {
-    if (bottom - y < 120) newPage();
-    const n = Math.max(1, Math.min(rest.length, Math.floor((bottom - y - 30) / 34)));
-    const chunk = rest.slice(0, n);
-    rest = rest.slice(n);
-    const h = Math.max(120, chunk.length * 34 + 30);
-    ctx.strokeStyle = '#9aa3ad';
-    ctx.lineWidth = 2;
-    ctx.strokeRect(PM, y, tw, h);
-    font(24);
-    ctx.fillStyle = INK;
-    chunk.forEach((ln, i) => ctx.fillText(ln, PM + 18, y + 16 + i * 34));
-    y += h;
-  } while (rest.length);
 
   // ページ番号
   pages.forEach((c, i) => {
@@ -653,13 +653,13 @@ async function renderReport(id) {
         <tr><th>作業内容</th><td>${esc(r.title)}</td></tr>
         <tr><th>担当者</th><td>${esc(r.worker)}</td></tr>
       </table>
+      <h2>まとめ・申し送り</h2>
+      <div class="summary">${esc(r.summary)}</div>
       <h2>写真記録（${photos.length}枚）</h2>
       <div class="grid">
         ${photos.map((p, i) => `
           <figure><img data-i="${i}" alt="写真${i + 1}"><figcaption><b>No.${i + 1}</b>${esc(p.caption)}</figcaption></figure>`).join('')}
       </div>
-      <h2>まとめ・申し送り</h2>
-      <div class="summary">${esc(r.summary)}</div>
       <p class="doc-foot">かんたん現場報告で作成</p>
     </article>`;
 
